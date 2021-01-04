@@ -54,17 +54,29 @@ class SentdeBot(sc2.BotAI):
             if self.units(UnitTypeId.GATEWAY).ready.exists and not self.units(UnitTypeId.CYBERNETICSCORE):
                 if self.can_afford(UnitTypeId.CYBERNETICSCORE) and not self.already_pending(UnitTypeId.CYBERNETICSCORE):
                     await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon)
-
+            # more gateways
             elif len(self.units(UnitTypeId.GATEWAY)) < 3:
                 if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
                     await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=2)
+            # create stargates
+            if self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
+                if len(self.units(UnitTypeId.STARGATE)) < 3:
+                    if self.can_afford(UnitTypeId.STARGATE) and not self.already_pending(UnitTypeId.STARGATE):
+                        await self.build(UnitTypeId.STARGATE, near=pylon, placement_step=2)
 
     async def build_offensive_force(self):
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
             if self.can_afford(UnitTypeId.STALKER) and self.supply_left > 0:
                 await self.do(gw.train(UnitTypeId.STALKER))
-            if self.can_afford(UnitTypeId.SENTRY) and self.supply_left > 0 and self.units(UnitTypeId.STALKER).amount > 5:
+            if self.can_afford(UnitTypeId.SENTRY) and self.supply_left > 0 \
+                    and self.units(UnitTypeId.STALKER).amount > 5:
                 await self.do(gw.train(UnitTypeId.SENTRY))
+
+        for sg in self.units(UnitTypeId.STARGATE).ready.idle:
+            if self.can_afford(UnitTypeId.VOIDRAY) and self.supply_left > 0:
+                await self.do(sg.train(UnitTypeId.VOIDRAY))
+            if self.can_afford(UnitTypeId.PHOENIX) and self.supply_left > 0:
+                await self.do(sg.train(UnitTypeId.PHOENIX))
 
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
@@ -75,14 +87,24 @@ class SentdeBot(sc2.BotAI):
             return self.enemy_start_locations[0]
 
     async def attack(self):
-        if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.SENTRY).amount > 0:
+        if self.units(UnitTypeId.STALKER).amount > 15 or self.units(UnitTypeId.VOIDRAY).amount > 7 \
+                or self.units(UnitTypeId.PHOENIX).amount > 12:
             for s in self.units(UnitTypeId.STALKER).idle:
                 await self.do(s.attack(self.find_target(self.state)))
+            for vd in self.units(UnitTypeId.VOIDRAY).idle:
+                await self.do(vd.attack(random.choice(self.known_enemy_units)))
+            for ph in self.units(UnitTypeId.PHOENIX).idle:
+                await self.do(ph.attack(random.choice(self.known_enemy_units)))
 
-        elif self.units(UnitTypeId.STALKER).amount > 3:
+        elif self.units(UnitTypeId.STALKER).amount > 5 or self.units(UnitTypeId.VOIDRAY).amount > 4 \
+                or self.units(UnitTypeId.PHOENIX).amount > 7:
             if len(self.known_enemy_units) > 0:
                 for s in self.units(UnitTypeId.STALKER).idle:
                     await self.do(s.attack(random.choice(self.known_enemy_units)))
+                for vd in self.units(UnitTypeId.VOIDRAY).idle:
+                    await self.do(vd.attack(random.choice(self.known_enemy_units)))
+                for ph in self.units(UnitTypeId.PHOENIX).idle:
+                    await self.do(ph.attack(random.choice(self.known_enemy_units)))
 
 
 run_game(maps.get("SubmarineLE"), [
