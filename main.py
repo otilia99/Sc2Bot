@@ -1,4 +1,4 @@
-import sc2 as sc2
+import sc2
 from sc2 import run_game, maps, Race, Difficulty
 from sc2.player import Bot, Computer
 from sc2.constants import UnitTypeId
@@ -14,6 +14,7 @@ class SentdeBot(sc2.BotAI):
         await self.expand()
         await self.offensive_force_buildings()
         await self.build_offensive_force()
+        await self.attack()
 
         if iteration == 0:
             await self.chat_send("(pylon)(glhf)")
@@ -28,19 +29,19 @@ class SentdeBot(sc2.BotAI):
             nexuses = self.units(UnitTypeId.NEXUS).ready
             if nexuses.exists:
                 if self.can_afford(UnitTypeId.PYLON):
-                    await self.build(UnitTypeId.PYLON, near=nexuses.first)
+                    await self.build(UnitTypeId.PYLON, near=nexuses.first, placement_step=3)
 
     async def build_assimilators(self):
         for nexus in self.units(UnitTypeId.NEXUS).ready:
-            vespenes = self.state.vespene_geyser.closer_than(15.0, nexus)
-            for vespene in vespenes:
+            vaspenes = self.state.vespene_geyser.closer_than(15.0, nexus)
+            for vaspene in vaspenes:
                 if not self.can_afford(UnitTypeId.ASSIMILATOR):
                     break
-                worker = self.select_build_worker(vespene.position)
+                worker = self.select_build_worker(vaspene.position)
                 if worker is None:
                     break
-                if not self.units(UnitTypeId.ASSIMILATOR).closer_than(1.0, vespene).exists:
-                    await self.do(worker.build(UnitTypeId.ASSIMILATOR, vespene))
+                if not self.units(UnitTypeId.ASSIMILATOR).closer_than(1.0, vaspene).exists:
+                    await self.do(worker.build(UnitTypeId.ASSIMILATOR, vaspene))
 
     async def expand(self):
         if self.units(UnitTypeId.NEXUS).amount < 3 and self.can_afford(UnitTypeId.NEXUS):
@@ -49,26 +50,21 @@ class SentdeBot(sc2.BotAI):
     async def offensive_force_buildings(self):
         if self.units(UnitTypeId.PYLON).ready.exists:
             pylon = self.units(UnitTypeId.PYLON).ready.random
-            if self.units(UnitTypeId.GATEWAY).ready.exists:
-                if not self.units(UnitTypeId.CYBERNETICSCORE):
-                    if self.can_afford(UnitTypeId.CYBERNETICSCORE) and \
-                            not self.already_pending(UnitTypeId.CYBERNETICSCORE):
-                        await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon)
-            else:
+
+            if self.units(UnitTypeId.GATEWAY).ready.exists and not self.units(UnitTypeId.CYBERNETICSCORE):
+                if self.can_afford(UnitTypeId.CYBERNETICSCORE) and not self.already_pending(UnitTypeId.CYBERNETICSCORE):
+                    await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon)
+
+            elif len(self.units(UnitTypeId.GATEWAY)) < 3:
                 if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
-                    await self.build(UnitTypeId.GATEWAY, near=pylon)
+                    await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=2)
 
     async def build_offensive_force(self):
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
-            if self.can_afford(UnitTypeId.STALKER) and self.supply_left > 0 and \
-                    self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
+            if self.can_afford(UnitTypeId.STALKER) and self.supply_left > 0:
                 await self.do(gw.train(UnitTypeId.STALKER))
-            if self.units(UnitTypeId.STALKER).amount > 7 and self.can_afford(
-                    UnitTypeId.SENTRY) and self.supply_left > 0:
+            if self.can_afford(UnitTypeId.SENTRY) and self.supply_left > 0 and self.units(UnitTypeId.STALKER).amount > 5:
                 await self.do(gw.train(UnitTypeId.SENTRY))
-            if self.units(UnitTypeId.STALKER).amount > 12 and self.units(UnitTypeId.SENTRY).amount > 5 \
-                    and self.can_afford(UnitTypeId.ZEALOT) and self.supply_left > 0:
-                await self.do(gw.train(UnitTypeId.ZEALOT))
 
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
@@ -79,11 +75,11 @@ class SentdeBot(sc2.BotAI):
             return self.enemy_start_locations[0]
 
     async def attack(self):
-        if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.SENTRY) > 0:
+        if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.SENTRY).amount > 0:
             for s in self.units(UnitTypeId.STALKER).idle:
                 await self.do(s.attack(self.find_target(self.state)))
 
-        elif self.units(UnitTypeId.STALKER).amount > 6:
+        elif self.units(UnitTypeId.STALKER).amount > 3:
             if len(self.known_enemy_units) > 0:
                 for s in self.units(UnitTypeId.STALKER).idle:
                     await self.do(s.attack(random.choice(self.known_enemy_units)))
@@ -91,5 +87,5 @@ class SentdeBot(sc2.BotAI):
 
 run_game(maps.get("SubmarineLE"), [
     Bot(Race.Protoss, SentdeBot()),
-    Computer(Race.Terran, Difficulty.Easy)
-], realtime=False)
+    Computer(Race.Terran, Difficulty.Medium)
+    ], realtime=False)
