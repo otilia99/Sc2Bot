@@ -6,6 +6,7 @@ import random
 import numpy as np
 import cv2
 import os
+
 # import keras
 # import tensorflow
 
@@ -101,7 +102,7 @@ class ProtossBot(sc2.BotAI):
             nexuses = self.units(UnitTypeId.NEXUS).ready
             if nexuses.exists:
                 if self.can_afford(UnitTypeId.PYLON):
-                    await self.build(UnitTypeId.PYLON, near=nexuses.first, placement_step=5)
+                    await self.build(UnitTypeId.PYLON, near=nexuses.first, placement_step=6)
 
     async def build_assimilators(self):
         for nexus in self.units(UnitTypeId.NEXUS).ready:
@@ -153,6 +154,9 @@ class ProtossBot(sc2.BotAI):
         send_to = position.Point2(position.Pointlike((x, y)))
         return send_to
 
+    def structure_status(self, unit):
+        return self.units(unit).ready.exists or self.already_pending(unit)
+
     async def offensive_force_buildings(self):
         # for nexus in self.townhalls.ready:
         #     if nexus.energy >= 50:
@@ -161,40 +165,59 @@ class ProtossBot(sc2.BotAI):
         if self.units(UnitTypeId.PYLON).ready.exists:
             pylon = self.units(UnitTypeId.PYLON).ready.random
 
-            if self.units(UnitTypeId.GATEWAY).ready.exists and not self.units(UnitTypeId.CYBERNETICSCORE):
-                if self.can_afford(UnitTypeId.CYBERNETICSCORE) and not self.already_pending(UnitTypeId.CYBERNETICSCORE):
-                    await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon, placement_step=1)
+            if not (self.structure_status(UnitTypeId.GATEWAY) and self.structure_status(UnitTypeId.CYBERNETICSCORE)
+                    and self.structure_status(UnitTypeId.STARGATE)):
+                if not self.structure_status(UnitTypeId.GATEWAY):
+                    if self.can_afford(UnitTypeId.GATEWAY):
+                        await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=1)
+                    return
+                if not self.structure_status(UnitTypeId.CYBERNETICSCORE):
+                    if self.can_afford(UnitTypeId.CYBERNETICSCORE):
+                        await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon, placement_step=1)
+                    return
+                if not self.structure_status(UnitTypeId.STARGATE):
+                    if self.can_afford(UnitTypeId.STARGATE):
+                        await self.build(UnitTypeId.STARGATE, near=pylon, placement_step=1)
+                    return
 
-            elif len(self.units(UnitTypeId.GATEWAY)) < 3:
+            if self.units(UnitTypeId.GATEWAY).amount < 3:
                 if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
                     await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=2)
 
-            # create stargates
+            # TODO fleet beacon for TEMPEST + MOTHERSHIP + air units upgrades
             if self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
-                if len(self.units(UnitTypeId.STARGATE)) < 4:
+                if self.units(UnitTypeId.STARGATE).amount < 3:
                     if self.can_afford(UnitTypeId.STARGATE) and not self.already_pending(UnitTypeId.STARGATE):
                         await self.build(UnitTypeId.STARGATE, near=pylon, placement_step=2)
 
-                if len(self.units(UnitTypeId.ROBOTICSFACILITY)) < 1:
-                    if self.can_afford(UnitTypeId.ROBOTICSFACILITY) and \
-                            not self.already_pending(UnitTypeId.ROBOTICSFACILITY):
-                        await self.build(UnitTypeId.ROBOTICSFACILITY, near=pylon, placement_step=2)
+                if self.units(UnitTypeId.ROBOTICSFACILITY).amount < 1 and \
+                        self.can_afford(UnitTypeId.ROBOTICSFACILITY) and \
+                        not self.already_pending(UnitTypeId.ROBOTICSFACILITY):
+                    await self.build(UnitTypeId.ROBOTICSFACILITY, near=pylon, placement_step=3)
 
-            #     if self.can_afford(AbilityId.RESEARCH_WARPGATE) \
-            #             and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
-            #         cybercore = self.units(UnitTypeId.CYBERNETICSCORE).ready.first
-            #         await self.do(cybercore.research(UpgradeId.WARPGATERESEARCH))
-            #
-            #     if len(self.units(UnitTypeId.TWILIGHTCOUNCIL)) < 1:
-            #         if self.can_afford(UnitTypeId.TWILIGHTCOUNCIL) and \
-            #                 not self.already_pending(UnitTypeId.TWILIGHTCOUNCIL):
-            #             await self.build(UnitTypeId.TWILIGHTCOUNCIL, near=pylon, placement_step=2)
-            #
-            # if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
-            #     if self.can_afford(AbilityId.RESEARCH_BLINK) \
-            #             and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
-            #         tcouncil = self.units(UnitTypeId.CYBERNETICSCORE).ready.first
-            #         await self.do(tcouncil.research(UpgradeId.BLINKTECH))
+                if self.units(UnitTypeId.ROBOTICSFACILITY).ready.exists and self.can_afford(UnitTypeId.ROBOTICSBAY) \
+                        and not self.already_pending(UnitTypeId.ROBOTICSBAY) \
+                        and self.units(UnitTypeId.ROBOTICSBAY).amount < 1:
+                    await self.build(UnitTypeId.ROBOTICSBAY, near=pylon, placement_step=3)
+
+                if self.units(UnitTypeId.TWILIGHTCOUNCIL).amount < 1:
+                    if self.can_afford(UnitTypeId.TWILIGHTCOUNCIL) and \
+                            not self.already_pending(UnitTypeId.TWILIGHTCOUNCIL):
+                        await self.build(UnitTypeId.TWILIGHTCOUNCIL, near=pylon, placement_step=2)
+
+                # TODO psionic storm upgrade
+                if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists \
+                        and self.units(UnitTypeId.TEMPLARARCHIVE).amount < 1:
+                    if self.can_afford(UnitTypeId.TEMPLARARCHIVE) and \
+                            not self.already_pending(UnitTypeId.TEMPLARARCHIVE):
+                        await self.build(UnitTypeId.TEMPLARARCHIVE, near=pylon, placement_step=2)
+
+                # TODO ground weapons upgrades
+                # if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
+                #     if self.can_afford(AbilityId.RESEARCH_BLINK) \
+                #             and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
+                #         tcouncil = self.units(UnitTypeId.CYBERNETICSCORE).ready.first
+                #         await self.do(tcouncil.research(UpgradeId.BLINKTECH))
 
     async def build_offensive_force(self):
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
@@ -245,11 +268,11 @@ class ProtossBot(sc2.BotAI):
     #                 await self.do(sen.attack(random.choice(self.known_enemy_units)))
     async def attack(self):
         attack_units = {
-                UnitTypeId.STALKER: [15, 5],
-                UnitTypeId.VOIDRAY: [8, 3],
-                UnitTypeId.PHOENIX: [8, 2],
-                UnitTypeId.SENTRY: [4, 3],
-                UnitTypeId.ZEALOT: [10, 5]}
+            UnitTypeId.STALKER: [15, 5],
+            UnitTypeId.VOIDRAY: [8, 3],
+            UnitTypeId.PHOENIX: [8, 2],
+            UnitTypeId.SENTRY: [4, 3],
+            UnitTypeId.ZEALOT: [10, 5]}
 
         for u in attack_units:
             if len(self.units(u).idle) > 0:
