@@ -39,7 +39,7 @@ class ProtossBot(sc2.BotAI):
         await self.build_offensive_force()
         await self.scout()
         await self.draw_base()
-        await self.attack()
+        # await self.attack()
 
         if iteration == 0:
             await self.chat_send("hi (pylon)(glhf)")
@@ -189,7 +189,7 @@ class ProtossBot(sc2.BotAI):
                 if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
                     await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=2)
 
-            # TODO fleet beacon for TEMPEST + MOTHERSHIP + air units upgrades
+            # TODO fleet beacon for TEMPEST + MOTHERSHIP
             if self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
                 if self.units(UnitTypeId.STARGATE).amount < 3:
                     if self.can_afford(UnitTypeId.STARGATE) and not self.already_pending(UnitTypeId.STARGATE):
@@ -210,7 +210,6 @@ class ProtossBot(sc2.BotAI):
                             not self.already_pending(UnitTypeId.TWILIGHTCOUNCIL):
                         await self.build(UnitTypeId.TWILIGHTCOUNCIL, near=pylon, placement_step=2)
 
-                # TODO psionic storm upgrade
                 if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists \
                         and self.units(UnitTypeId.TEMPLARARCHIVE).amount < 1:
                     if self.can_afford(UnitTypeId.TEMPLARARCHIVE) and \
@@ -223,7 +222,6 @@ class ProtossBot(sc2.BotAI):
             await self.do(building.research(upgrade_id))
 
     async def upgrades(self):
-        # TODO ground weapons upgrades
         if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
             tcouncil = self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.first
             if self.can_afford(AbilityId.RESEARCH_BLINK) and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
@@ -293,25 +291,38 @@ class ProtossBot(sc2.BotAI):
                                       UpgradeId.PROTOSSAIRWEAPONSLEVEL3, cybercore,
                                       UnitTypeId.VOIDRAY, 10)
 
-    # async def train_units(self):
+    async def train_units(self, unit_id, building, unit_cond_id=None, amount=None):
+        if unit_cond_id is None and amount is None:
+            cond = True
+        else:
+            cond = self.units(unit_cond_id).amount >= amount
+        if self.can_afford(unit_id) and self.supply_left > 2 and cond:
+            await self.do(building.train(unit_id))
 
     async def build_offensive_force(self):
-        for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
-            if self.can_afford(UnitTypeId.STALKER) and self.supply_left > 0:
-                await self.do(gw.train(UnitTypeId.STALKER))
-            if self.can_afford(UnitTypeId.SENTRY) and self.supply_left > 0 \
-                    and self.units(UnitTypeId.STALKER).amount > 5:
-                await self.do(gw.train(UnitTypeId.SENTRY))
+        if self.units(UnitTypeId.STALKER).amount >= 3 and self.units(UnitTypeId.VOIDRAY).amount \
+                + self.already_pending(UnitTypeId.VOIDRAY) < 5:
+            for sg in self.units(UnitTypeId.STARGATE).ready.idle:
+                await self.train_units(UnitTypeId.VOIDRAY, sg)
+            return
 
         for sg in self.units(UnitTypeId.STARGATE).ready.idle:
-            if self.can_afford(UnitTypeId.VOIDRAY) and self.supply_left > 0:
-                await self.do(sg.train(UnitTypeId.VOIDRAY))
-            if self.can_afford(UnitTypeId.PHOENIX) and self.supply_left > 0 and \
-                    self.units(UnitTypeId.VOIDRAY).amount > 6:
-                await self.do(sg.train(UnitTypeId.PHOENIX))
-            if self.can_afford(UnitTypeId.ORACLE) and self.supply_left > 0 \
-                    and self.units(UnitTypeId.ORACLE).amount < 1:
-                await self.do(sg.train(UnitTypeId.ORACLE))
+            await self.train_units(UnitTypeId.VOIDRAY, sg)
+            await self.train_units(UnitTypeId.PHOENIX, sg, unit_cond_id=UnitTypeId.VOIDRAY, amount=6)
+            if self.units(UnitTypeId.ORACLE).amount < 1:
+                await self.train_units(UnitTypeId.ORACLE, sg)
+
+        for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
+            await self.train_units(UnitTypeId.STALKER, gw)
+            await self.train_units(UnitTypeId.SENTRY, gw, unit_cond_id=UnitTypeId.VOIDRAY, amount=3)
+            await self.train_units(UnitTypeId.ZEALOT, gw, unit_cond_id=UnitTypeId.STALKER, amount=3)
+
+        for rb in self.units(UnitTypeId.ROBOTICSBAY).ready.idle:
+            await self.train_units(UnitTypeId.COLOSSUS, rb, unit_cond_id=UnitTypeId.VOIDRAY, amount=15)
+
+        # for ta in self.units(UnitTypeId.TEMPLARARCHIVE).ready.idle:
+        #     await self.train_units(UnitTypeId.HIGHTEMPLAR, ta, UnitTypeId.VOIDRAY, 8)
+        #     await self.train_units(UnitTypeId.ARCHON, ta, UnitTypeId.HIGHTEMPLAR, 3)
 
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
@@ -322,6 +333,16 @@ class ProtossBot(sc2.BotAI):
             return self.enemy_start_locations[0]
 
     # async def attack(self):
+    # attack_units = {
+    #     UnitTypeId.STALKER: [15, 5],
+    #     UnitTypeId.VOIDRAY: [8, 3],
+    #     UnitTypeId.PHOENIX: [8, 2],
+    #     UnitTypeId.SENTRY: [4, 3],
+    #     UnitTypeId.ZEALOT: [6, 5],
+    #     UnitTypeId.ORACLE: [1, 1],
+    #     UnitTypeId.HIGHTEMPLAR: [4, 3],
+    #     UnitTypeId.ARCHON: [4, 2],
+    #     UnitTypeId.COLOSSUS: [5, 4]}
     #     if self.units(UnitTypeId.STALKER).amount > 15 or self.units(UnitTypeId.VOIDRAY).amount > 10:
     #         for s in self.units(UnitTypeId.STALKER).idle:
     #             await self.do(s.attack(self.find_target(self.state)))
@@ -348,7 +369,11 @@ class ProtossBot(sc2.BotAI):
             UnitTypeId.VOIDRAY: [8, 3],
             UnitTypeId.PHOENIX: [8, 2],
             UnitTypeId.SENTRY: [4, 3],
-            UnitTypeId.ZEALOT: [10, 5]}
+            UnitTypeId.ZEALOT: [6, 5],
+            UnitTypeId.ORACLE: [1, 1],
+            UnitTypeId.HIGHTEMPLAR: [4, 3],
+            UnitTypeId.ARCHON: [4, 2],
+            UnitTypeId.COLOSSUS: [5, 4]}
 
         for u in attack_units:
             if len(self.units(u).idle) > 0:
