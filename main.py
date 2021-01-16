@@ -35,6 +35,7 @@ class ProtossBot(sc2.BotAI):
         await self.build_assimilators()
         await self.expand()
         await self.offensive_force_buildings()
+        await self.upgrades()
         await self.build_offensive_force()
         await self.scout()
         await self.draw_base()
@@ -166,7 +167,7 @@ class ProtossBot(sc2.BotAI):
             pylon = self.units(UnitTypeId.PYLON).ready.random
 
             if not (self.structure_status(UnitTypeId.GATEWAY) and self.structure_status(UnitTypeId.CYBERNETICSCORE)
-                    and self.structure_status(UnitTypeId.STARGATE)):
+                    and self.structure_status(UnitTypeId.STARGATE) and self.structure_status(UnitTypeId.FORGE)):
                 if not self.structure_status(UnitTypeId.GATEWAY):
                     if self.can_afford(UnitTypeId.GATEWAY):
                         await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=1)
@@ -178,6 +179,10 @@ class ProtossBot(sc2.BotAI):
                 if not self.structure_status(UnitTypeId.STARGATE):
                     if self.can_afford(UnitTypeId.STARGATE):
                         await self.build(UnitTypeId.STARGATE, near=pylon, placement_step=1)
+                    return
+                if not self.structure_status(UnitTypeId.FORGE):
+                    if self.can_afford(UnitTypeId.FORGE):
+                        await self.build(UnitTypeId.FORGE, near=pylon, placement_step=2)
                     return
 
             if self.units(UnitTypeId.GATEWAY).amount < 3:
@@ -212,12 +217,83 @@ class ProtossBot(sc2.BotAI):
                             not self.already_pending(UnitTypeId.TEMPLARARCHIVE):
                         await self.build(UnitTypeId.TEMPLARARCHIVE, near=pylon, placement_step=2)
 
-                # TODO ground weapons upgrades
-                # if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
-                #     if self.can_afford(AbilityId.RESEARCH_BLINK) \
-                #             and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
-                #         tcouncil = self.units(UnitTypeId.CYBERNETICSCORE).ready.first
-                #         await self.do(tcouncil.research(UpgradeId.BLINKTECH))
+    async def do_upgrade(self, ability_id, upgrade_id, building, unit_id, unit_amount):
+        if self.can_afford(ability_id) and not self.already_pending_upgrade(upgrade_id) and \
+                self.units(unit_id).amount >= unit_amount:
+            await self.do(building.research(upgrade_id))
+
+    async def upgrades(self):
+        # TODO ground weapons upgrades
+        if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
+            tcouncil = self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.first
+            if self.can_afford(AbilityId.RESEARCH_BLINK) and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
+                await self.do(tcouncil.research(UpgradeId.BLINKTECH))
+
+        if self.units(UnitTypeId.FORGE).ready.exists:
+            built_forge = self.units(UnitTypeId.FORGE).ready.first
+            await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDWEAPONSLEVEL1,
+                                  UpgradeId.PROTOSSGROUNDWEAPONSLEVEL1, built_forge,
+                                  UnitTypeId.STALKER, 5)
+
+            await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDARMORLEVEL1,
+                                  UpgradeId.PROTOSSGROUNDARMORSLEVEL1, built_forge,
+                                  UnitTypeId.STALKER, 10)
+
+            await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSSHIELDSLEVEL1,
+                                  UpgradeId.PROTOSSSHIELDSLEVEL1, built_forge,
+                                  UnitTypeId.STALKER, 15)
+
+            if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
+                await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDWEAPONSLEVEL2,
+                                      UpgradeId.PROTOSSGROUNDWEAPONSLEVEL2, built_forge,
+                                      UnitTypeId.VOIDRAY, 5)
+
+                await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDARMORLEVEL2,
+                                      UpgradeId.PROTOSSGROUNDARMORSLEVEL2, built_forge,
+                                      UnitTypeId.VOIDRAY, 7)
+
+                await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSSHIELDSLEVEL2,
+                                      UpgradeId.PROTOSSSHIELDSLEVEL1, built_forge,
+                                      UnitTypeId.VOIDRAY, 9)
+
+                await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDWEAPONSLEVEL3,
+                                      UpgradeId.PROTOSSGROUNDWEAPONSLEVEL3, built_forge,
+                                      UnitTypeId.VOIDRAY, 5)
+
+                await self.do_upgrade(AbilityId.FORGERESEARCH_PROTOSSGROUNDARMORLEVEL3,
+                                      UpgradeId.PROTOSSGROUNDARMORSLEVEL3, built_forge,
+                                      UnitTypeId.VOIDRAY, 7)
+
+            if self.units(UnitTypeId.TEMPLARARCHIVE).ready.exists:
+                temparch = self.units(UnitTypeId.TEMPLARARCHIVE).ready.first
+                await self.do_upgrade(AbilityId.TWILIGHTCOUNCILRESEARCH_RESEARCHPSIONICSURGE,
+                                      UpgradeId.PSISTORMTECH, temparch,
+                                      UnitTypeId.HIGHTEMPLAR, 2)
+
+            if self.units(UnitTypeId.ROBOTICSBAY).ready.exists:
+                robbay = self.units(UnitTypeId.ROBOTICSBAY).ready.first
+                await self.do_upgrade(AbilityId.RESEARCH_EXTENDEDTHERMALLANCE, UpgradeId.EXTENDEDTHERMALLANCE, robbay,
+                                      UnitTypeId.COLOSSUS, 2)
+
+            if self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
+                cybercore = self.units(UnitTypeId.CYBERNETICSCORE).ready.first
+                await self.do_upgrade(AbilityId.CYBERNETICSCORERESEARCH_PROTOSSAIRWEAPONSLEVEL1,
+                                      UpgradeId.PROTOSSAIRWEAPONSLEVEL1, cybercore,
+                                      UnitTypeId.VOIDRAY, 5)
+
+                await self.do_upgrade(AbilityId.CYBERNETICSCORERESEARCH_PROTOSSAIRARMORLEVEL1,
+                                      UpgradeId.PROTOSSAIRARMORSLEVEL1, cybercore,
+                                      UnitTypeId.VOIDRAY, 15)
+
+                await self.do_upgrade(AbilityId.CYBERNETICSCORERESEARCH_PROTOSSAIRWEAPONSLEVEL2,
+                                      UpgradeId.PROTOSSAIRWEAPONSLEVEL2, cybercore,
+                                      UnitTypeId.VOIDRAY, 8)
+
+                await self.do_upgrade(AbilityId.CYBERNETICSCORERESEARCH_PROTOSSAIRWEAPONSLEVEL3,
+                                      UpgradeId.PROTOSSAIRWEAPONSLEVEL3, cybercore,
+                                      UnitTypeId.VOIDRAY, 10)
+
+    # async def train_units(self):
 
     async def build_offensive_force(self):
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
