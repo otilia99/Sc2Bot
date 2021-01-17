@@ -41,6 +41,7 @@ class ProtossBot(sc2.BotAI):
         await self.build_offensive_force()
         await self.scout()
         await self.draw_base()
+        print(self.alive_or_pending_units(UnitTypeId.STALKER))
         # await self.attack()
 
         if iteration == 0:
@@ -119,10 +120,26 @@ class ProtossBot(sc2.BotAI):
                 if not self.units(UnitTypeId.ASSIMILATOR).closer_than(1.0, vespene).exists:
                     await self.do(worker.build(UnitTypeId.ASSIMILATOR, vespene))
 
+    async def expand_correct_location(self):
+        location = await self.get_next_expansion()
+        await self.build(UnitTypeId.NEXUS, near=location, random_alternative=False)
+
     async def expand(self):
-        if self.units(UnitTypeId.NEXUS).amount < 5 and \
+        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 3 and \
                 self.can_afford(UnitTypeId.NEXUS):
-            await self.expand_now()
+            await self.expand_correct_location()
+            return
+
+        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 5 and self.can_afford(UnitTypeId.NEXUS) and\
+                self.alive_or_pending_units(UnitTypeId.STALKER) >= 3 and \
+                self.alive_or_pending_units(UnitTypeId.ZEALOT) >= 2 and \
+                self.alive_or_pending_units(UnitTypeId.VOIDRAY) >= 2:
+            await self.expand_correct_location()
+            return
+
+        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 6 and self.can_afford(UnitTypeId.NEXUS) and\
+                self.units(UnitTypeId.STALKER).amount > 8 and self.units(UnitTypeId.VOIDRAY).amount > 7:
+            await self.expand_correct_location()
 
     async def scout(self):
         if not self.scouting_done:
@@ -177,6 +194,9 @@ class ProtossBot(sc2.BotAI):
                 if not self.structure_status(UnitTypeId.CYBERNETICSCORE):
                     if self.can_afford(UnitTypeId.CYBERNETICSCORE):
                         await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon, placement_step=1)
+                    return
+                if self.alive_or_pending_units(UnitTypeId.STALKER) < 3 and \
+                        self.alive_or_pending_units(UnitTypeId.ZEALOT) < 2:
                     return
                 if not self.structure_status(UnitTypeId.STARGATE):
                     if self.can_afford(UnitTypeId.STARGATE):
@@ -298,8 +318,11 @@ class ProtossBot(sc2.BotAI):
         if self.ramp_pos is None:
             self.ramp_pos = list(self.main_base_ramp.upper)[0]
         if self.point is None:
-            self.point = self.random_location_variance(self.ramp_pos, default_range=12)
+            self.point = self.random_location_variance(self.ramp_pos, default_range=10)
         return self.point, self.ramp_pos
+
+    def alive_or_pending_units(self, unit_id):
+        return self.units(unit_id).ready.amount + self.already_pending(unit_id)
 
     async def send_units_to(self):
         units_list = []
@@ -332,6 +355,16 @@ class ProtossBot(sc2.BotAI):
             await self.do(building.train(unit_id))
 
     async def build_offensive_force(self):
+        if self.alive_or_pending_units(UnitTypeId.ZEALOT) < 2:
+            for gw in self.units(UnitTypeId.GATEWAY).ready:
+                await self.train_units(UnitTypeId.ZEALOT, gw)
+            return
+
+        if self.alive_or_pending_units(UnitTypeId.STALKER) < 3:
+            for gw in self.units(UnitTypeId.GATEWAY).ready:
+                await self.train_units(UnitTypeId.STALKER, gw)
+            return
+
         if self.units(UnitTypeId.STALKER).amount >= 3 and self.units(UnitTypeId.VOIDRAY).amount \
                 + self.already_pending(UnitTypeId.VOIDRAY) < 5:
             for sg in self.units(UnitTypeId.STARGATE).ready.idle:
@@ -347,7 +380,7 @@ class ProtossBot(sc2.BotAI):
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
             await self.train_units(UnitTypeId.STALKER, gw)
             await self.train_units(UnitTypeId.SENTRY, gw, unit_cond_id=UnitTypeId.VOIDRAY, amount=3)
-            await self.train_units(UnitTypeId.ZEALOT, gw, unit_cond_id=UnitTypeId.STALKER, amount=3)
+            await self.train_units(UnitTypeId.ZEALOT, gw, unit_cond_id=UnitTypeId.STALKER, amount=1)
 
         for rb in self.units(UnitTypeId.ROBOTICSBAY).ready.idle:
             await self.train_units(UnitTypeId.COLOSSUS, rb, unit_cond_id=UnitTypeId.VOIDRAY, amount=7)
