@@ -24,6 +24,8 @@ class ProtossBot(sc2.BotAI):
         self.scouting_done = False
         self.point = None
         self.ramp_pos = None
+        self.no_of_buildings = 0
+        self.prev_no_of_buildings = 0
     # def save_end_result(self, game_result):
     #     if game_result == Result.Victory:
     #         np.save('/results.txt', self.train_data)
@@ -37,12 +39,11 @@ class ProtossBot(sc2.BotAI):
         await self.expand()
         await self.offensive_force_buildings()
         await self.upgrades()
-        await self.send_units_to()
         await self.build_offensive_force()
         await self.scout()
-        await self.draw_base()
-        print(self.alive_or_pending_units(UnitTypeId.STALKER))
-        # await self.attack()
+        await self.rally_new_building()
+        # await self.draw_base()
+        await self.attack()
 
         if iteration == 0:
             await self.chat_send("hi (pylon)(glhf)")
@@ -246,6 +247,9 @@ class ProtossBot(sc2.BotAI):
     async def upgrades(self):
         if self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.exists:
             tcouncil = self.units(UnitTypeId.TWILIGHTCOUNCIL).ready.first
+            if self.can_afford(AbilityId.RESEARCH_CHARGE) and not self.already_pending_upgrade(UpgradeId.CHARGE):
+                await self.do(tcouncil.research(UpgradeId.CHARGE))
+
             if self.can_afford(AbilityId.RESEARCH_BLINK) and not self.already_pending_upgrade(UpgradeId.BLINKTECH):
                 await self.do(tcouncil.research(UpgradeId.BLINKTECH))
 
@@ -324,28 +328,6 @@ class ProtossBot(sc2.BotAI):
     def alive_or_pending_units(self, unit_id):
         return self.units(unit_id).ready.amount + self.already_pending(unit_id)
 
-    async def send_units_to(self):
-        units_list = []
-        attack_units = {
-            UnitTypeId.STALKER: [15, 5],
-            UnitTypeId.VOIDRAY: [8, 3],
-            UnitTypeId.PHOENIX: [8, 2],
-            UnitTypeId.SENTRY: [4, 3],
-            UnitTypeId.ZEALOT: [6, 5],
-            UnitTypeId.ORACLE: [1, 1],
-            UnitTypeId.HIGHTEMPLAR: [4, 3],
-            UnitTypeId.ARCHON: [4, 2],
-            UnitTypeId.COLOSSUS: [5, 4]}
-        point, ramp_pos = self.ret_pos
-
-        for unit_id in attack_units:
-            for unit in self.units(unit_id).ready.idle:
-                units_list.append(unit)
-
-        for unit in units_list:
-            await self.do(unit.move(ramp_pos))
-            await self.do(unit.patrol(point, queue=True))
-
     async def train_units(self, unit_id, building, unit_cond_id=None, amount=None):
         if unit_cond_id is None and amount is None:
             cond = True
@@ -353,6 +335,20 @@ class ProtossBot(sc2.BotAI):
             cond = self.units(unit_cond_id).amount >= amount
         if self.can_afford(unit_id) and self.supply_left > 2 and cond:
             await self.do(building.train(unit_id))
+
+    async def rally_units(self):
+        rally_buildings = [UnitTypeId.GATEWAY, UnitTypeId.STARGATE, UnitTypeId.ROBOTICSFACILITY]
+        location_point, _ = self.ret_pos
+        for building in rally_buildings:
+            for b in self.units(building):
+                await self.do(b(AbilityId.RALLY_BUILDING, location_point))
+
+    async def rally_new_building(self):
+        rally_buildings = [UnitTypeId.GATEWAY, UnitTypeId.STARGATE, UnitTypeId.ROBOTICSFACILITY]
+        self.no_of_buildings = sum([self.units(building).ready.amount for building in rally_buildings])
+        if self.no_of_buildings != self.prev_no_of_buildings:
+            await self.rally_units()
+        self.prev_no_of_buildings = self.no_of_buildings
 
     async def build_offensive_force(self):
         if self.alive_or_pending_units(UnitTypeId.ZEALOT) < 2:
@@ -385,9 +381,8 @@ class ProtossBot(sc2.BotAI):
         for rb in self.units(UnitTypeId.ROBOTICSBAY).ready.idle:
             await self.train_units(UnitTypeId.COLOSSUS, rb, unit_cond_id=UnitTypeId.VOIDRAY, amount=7)
 
-        # for ta in self.units(UnitTypeId.TEMPLARARCHIVE).ready.idle:
-        #     await self.train_units(UnitTypeId.HIGHTEMPLAR, ta, UnitTypeId.VOIDRAY, 8)
-        #     await self.train_units(UnitTypeId.ARCHON, ta, UnitTypeId.HIGHTEMPLAR, 3)
+        for ta in self.units(UnitTypeId.GATEWAY).ready.idle:
+            await self.train_units(UnitTypeId.HIGHTEMPLAR, ta, UnitTypeId.VOIDRAY, 7)
 
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
@@ -405,32 +400,31 @@ class ProtossBot(sc2.BotAI):
             UnitTypeId.SENTRY: [4, 3],
             UnitTypeId.ZEALOT: [6, 5],
             UnitTypeId.ORACLE: [1, 1],
-            UnitTypeId.HIGHTEMPLAR: [4, 3],
-            UnitTypeId.ARCHON: [4, 2],
             UnitTypeId.COLOSSUS: [5, 4]}
 
         if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.VOIDRAY).amount > 10:
-            for s in self.units(UnitTypeId.STALKER).idle:
+            for s in self.units(UnitTypeId.STALKER):
                 await self.do(s.attack(self.find_target(self.state)))
-            for vd in self.units(UnitTypeId.VOIDRAY).idle:
+            for vd in self.units(UnitTypeId.VOIDRAY):
                 await self.do(vd.attack(self.find_target(self.state)))
-            for ph in self.units(UnitTypeId.PHOENIX).idle:
+            for ph in self.units(UnitTypeId.PHOENIX):
                 await self.do(ph.attack(self.find_target(self.state)))
-            for sen in self.units(UnitTypeId.SENTRY).idle:
+            for sen in self.units(UnitTypeId.SENTRY):
                 await self.do(sen.attack(self.find_target(self.state)))
-            for col in self.units(UnitTypeId.COLOSSUS).idle:
+            for col in self.units(UnitTypeId.COLOSSUS):
                 await self.do(col.attack(self.find_target(self.state)))
 
         elif self.units(UnitTypeId.STALKER).amount > 5 and self.units(UnitTypeId.VOIDRAY).amount > 5:
             if len(self.known_enemy_units) > 0:
-                for s in self.units(UnitTypeId.STALKER).idle:
+                for s in self.units(UnitTypeId.STALKER):
                     await self.do(s.attack(random.choice(self.known_enemy_units)))
-                for vd in self.units(UnitTypeId.VOIDRAY).idle:
+                for vd in self.units(UnitTypeId.VOIDRAY):
                     await self.do(vd.attack(random.choice(self.known_enemy_units)))
-                for ph in self.units(UnitTypeId.PHOENIX).idle:
+                for ph in self.units(UnitTypeId.PHOENIX):
                     await self.do(ph.attack(random.choice(self.known_enemy_units)))
-                for sen in self.units(UnitTypeId.SENTRY).idle:
+                for sen in self.units(UnitTypeId.SENTRY):
                     await self.do(sen.attack(random.choice(self.known_enemy_units)))
+
     # async def attack(self):
     #     attack_units = {
     #         UnitTypeId.STALKER: [15, 5],
