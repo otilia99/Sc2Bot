@@ -1,3 +1,4 @@
+from enum import Enum
 import sc2
 from sc2 import run_game, maps, Race, Difficulty, position, Result
 from sc2.player import Bot, Computer
@@ -6,11 +7,17 @@ import random
 import numpy as np
 import cv2
 import os
-
-# import keras
-# import tensorflow
+from sc2.units import Units
 
 os.environ["SC2PATH"] = 'D:/Downloads/Starcraft II/Starcraft II'
+
+
+class Scenario(Enum):
+    PEACE = 0
+    BASE_ATTACK = 1
+    OUTER_BASES_ATTACK = 2
+    ATTACK_ENEMY_BASE = 3
+    FIGHT_BACK_ATTACK = 4
 
 
 class ProtossBot(sc2.BotAI):
@@ -24,8 +31,27 @@ class ProtossBot(sc2.BotAI):
         self.scouting_done = False
         self.point = None
         self.ramp_pos = None
+        self.main_base = None
+        self.current_scenario = Scenario.PEACE
         self.no_of_buildings = 0
         self.prev_no_of_buildings = 0
+        self.attack_units = {
+            UnitTypeId.STALKER: [15, 5],
+            UnitTypeId.VOIDRAY: [8, 3],
+            UnitTypeId.PHOENIX: [8, 2],
+            UnitTypeId.SENTRY: [4, 3],
+            UnitTypeId.ZEALOT: [6, 5],
+            UnitTypeId.ORACLE: [1, 1],
+            UnitTypeId.COLOSSUS: [5, 4]}
+
+        self.all_unit_names = {UnitTypeId.STALKER: "stalker",
+                               UnitTypeId.VOIDRAY: "voidray",
+                               UnitTypeId.PHOENIX: "phoenix",
+                               UnitTypeId.SENTRY: "sentry",
+                               UnitTypeId.ZEALOT: "zealot",
+                               UnitTypeId.ORACLE: "oracle",
+                               UnitTypeId.COLOSSUS: "colossus"}
+
     # def save_end_result(self, game_result):
     #     if game_result == Result.Victory:
     #         np.save('/results.txt', self.train_data)
@@ -42,6 +68,7 @@ class ProtossBot(sc2.BotAI):
         await self.build_offensive_force()
         await self.scout()
         await self.rally_new_building()
+        await self.log_army_state()
         # await self.draw_base()
         await self.attack()
 
@@ -131,14 +158,14 @@ class ProtossBot(sc2.BotAI):
             await self.expand_correct_location()
             return
 
-        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 5 and self.can_afford(UnitTypeId.NEXUS) and\
+        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 5 and self.can_afford(UnitTypeId.NEXUS) and \
                 self.alive_or_pending_units(UnitTypeId.STALKER) >= 3 and \
                 self.alive_or_pending_units(UnitTypeId.ZEALOT) >= 2 and \
                 self.alive_or_pending_units(UnitTypeId.VOIDRAY) >= 2:
             await self.expand_correct_location()
             return
 
-        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 6 and self.can_afford(UnitTypeId.NEXUS) and\
+        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 6 and self.can_afford(UnitTypeId.NEXUS) and \
                 self.units(UnitTypeId.STALKER).amount > 8 and self.units(UnitTypeId.VOIDRAY).amount > 7:
             await self.expand_correct_location()
 
@@ -392,74 +419,99 @@ class ProtossBot(sc2.BotAI):
         else:
             return self.enemy_start_locations[0]
 
+    async def log_army_state(self):
+        for unit in self.attack_units:
+            print(f"{self.all_unit_names[unit]} : {self.units(unit).amount}")
+            print(self.current_scenario.name)
+
+    async def attack_target(self, unit_id_list, target=None):
+        for unit_id in unit_id_list:
+            for unit in self.units(unit_id):
+                if target is None and self.known_enemy_units:
+                    target = self.known_enemy_units.closest_to(unit)
+                await self.do(unit.attack(target))
+
+    @property
+    def get_main_base(self):
+        if self.main_base is None:
+            self.main_base = self.units(UnitTypeId.NEXUS).first
+        return self.main_base
+
+    def nexus_index(self):
+        first_base = self.get_main_base
+        return enumerate(self.units(UnitTypeId.NEXUS).sorted_by_distance_to(first_base))
+
+    def nexus_is_under_attack(self):
+        for index, nexus in self.nexus_index():
+            close_enemies = self.known_enemy_units.closer_than(10, nexus)
+            if close_enemies:
+                return index, close_enemies
+        return None, []
+
+    def retreat_distance(self, unit):
+        return unit.distance_to(self.get_main_base) < 70
+
+    def handle_scenario(self):
+        all_attacking_enemies = []
+        for unit in self.units.owned:
+            close_enemies = self.known_enemy_units.closer_than(10, unit)
+            if close_enemies:
+                all_attacking_enemies.extend(close_enemies)
+        index, close_enemies = self.nexus_is_under_attack()
+        if all_attacking_enemies:
+            if index is not None:
+                if index > 2:
+                    self.current_scenario = Scenario.OUTER_BASES_ATTACK
+                else:
+                    self.current_scenario = Scenario.BASE_ATTACK
+            else:
+                if self.retreat_distance(Units(all_attacking_enemies).closest_to(self.get_main_base)):
+                    self.current_scenario = Scenario.FIGHT_BACK_ATTACK
+        if not self.current_scenario in [Scenario.BASE_ATTACK, Scenario.OUTER_BASES_ATTACK, Scenario.FIGHT_BACK_ATTACK]\
+                and self.units(UnitTypeId.VOIDRAY).amount > 15 and self.units(UnitTypeId.STALKER).amount > 10:
+            self.current_scenario = Scenario.ATTACK_ENEMY_BASE
+        return all_attacking_enemies
+
+    def owned_army(self):
+        army = []
+        for unit_id in self.attack_units.keys():
+            for unit in self.units(unit_id):
+                army.append(unit)
+        return army
+
+    async def retreat_all_units_if_too_far(self):
+        for unit in self.owned_army():
+            if self.retreat_distance(unit):
+                await self.do(unit.move(self.ret_pos[0]))
+
     async def attack(self):
-        attack_units = {
-            UnitTypeId.STALKER: [15, 5],
-            UnitTypeId.VOIDRAY: [8, 3],
-            UnitTypeId.PHOENIX: [8, 2],
-            UnitTypeId.SENTRY: [4, 3],
-            UnitTypeId.ZEALOT: [6, 5],
-            UnitTypeId.ORACLE: [1, 1],
-            UnitTypeId.COLOSSUS: [5, 4]}
+        attacking_enemies = self.handle_scenario()
+        index, close_enemies = self.nexus_is_under_attack()
 
-        if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.VOIDRAY).amount > 10:
-            for s in self.units(UnitTypeId.STALKER):
-                await self.do(s.attack(self.find_target(self.state)))
-            for vd in self.units(UnitTypeId.VOIDRAY):
-                await self.do(vd.attack(self.find_target(self.state)))
-            for ph in self.units(UnitTypeId.PHOENIX):
-                await self.do(ph.attack(self.find_target(self.state)))
-            for sen in self.units(UnitTypeId.SENTRY):
-                await self.do(sen.attack(self.find_target(self.state)))
-            for col in self.units(UnitTypeId.COLOSSUS):
-                await self.do(col.attack(self.find_target(self.state)))
+        if not self.current_scenario == Scenario.ATTACK_ENEMY_BASE:
+            await self.retreat_all_units_if_too_far()
 
-        elif self.units(UnitTypeId.STALKER).amount > 5 and self.units(UnitTypeId.VOIDRAY).amount > 5:
-            if len(self.known_enemy_units) > 0:
-                for s in self.units(UnitTypeId.STALKER):
-                    await self.do(s.attack(random.choice(self.known_enemy_units)))
-                for vd in self.units(UnitTypeId.VOIDRAY):
-                    await self.do(vd.attack(random.choice(self.known_enemy_units)))
-                for ph in self.units(UnitTypeId.PHOENIX):
-                    await self.do(ph.attack(random.choice(self.known_enemy_units)))
-                for sen in self.units(UnitTypeId.SENTRY):
-                    await self.do(sen.attack(random.choice(self.known_enemy_units)))
+        if self.current_scenario == Scenario.PEACE:
+            return
+        elif self.current_scenario == Scenario.BASE_ATTACK:
+            target = random.choice(close_enemies)
+            await self.attack_target(self.attack_units.keys(), target)
+        elif self.current_scenario == Scenario.OUTER_BASES_ATTACK:
+            target = random.choice(close_enemies)
+            await self.attack_target(self.attack_units.keys(), target)
+        elif self.current_scenario == Scenario.FIGHT_BACK_ATTACK:
+            await self.attack_target(self.attack_units.keys())
+        elif self.current_scenario == Scenario.ATTACK_ENEMY_BASE:
+            target = self.find_target(self.state)
+            await self.attack_target(self.attack_units.keys(), target)
 
-    # async def attack(self):
-    #     attack_units = {
-    #         UnitTypeId.STALKER: [15, 5],
-    #         UnitTypeId.VOIDRAY: [8, 3],
-    #         UnitTypeId.PHOENIX: [8, 2],
-    #         UnitTypeId.SENTRY: [4, 3],
-    #         UnitTypeId.ZEALOT: [6, 5],
-    #         UnitTypeId.ORACLE: [1, 1],
-    #         UnitTypeId.HIGHTEMPLAR: [4, 3],
-    #         UnitTypeId.ARCHON: [4, 2],
-    #         UnitTypeId.COLOSSUS: [5, 4]}
-    #
-    #     for u in attack_units:
-    #         if len(self.units(u).idle) > 0:
-    #             choice = random.randrange(0, 4)
-    #             target = False
-    #             if self.iteration > self.do_smth_after_this:
-    #                 if choice == 0:
-    #                     wait = random.randrange(20, 165)
-    #                     self.do_smth_after_this = self.iteration + wait
-    #
-    #                 elif choice == 1:
-    #                     if len(self.known_enemy_units) > 0:
-    #                         target = self.known_enemy_units.closest_to(random.choice(self.units(UnitTypeId.NEXUS)))
-    #
-    #                 elif choice == 2:
-    #                     if len(self.known_enemy_structures) > 0:
-    #                         target = random.choice(self.known_enemy_structures)
-    #
-    #                 elif choice == 3:
-    #                     target = self.enemy_start_locations[0]
-    #
-    #                 if target:
-    #                     for un in self.units(u).idle:
-    #                         await self.do(un.attack(target))
+        # if self.units(UnitTypeId.STALKER).amount > 5 and self.units(UnitTypeId.VOIDRAY).amount > 4:
+        #     target = self.find_target(self.state)
+        #     await self.attack_target(self.attack_units.keys(), target)
+
+        # elif self.units(UnitTypeId.STALKER).amount >= 1 and self.units(UnitTypeId.VOIDRAY).amount >= 0:
+        #     if len(self.known_enemy_units) > 0:
+        #         await self.attack_target(self.attack_units.keys())
 
 
 run_game(maps.get("RomanticideLE"), [
