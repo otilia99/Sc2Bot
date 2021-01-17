@@ -22,7 +22,8 @@ class ProtossBot(sc2.BotAI):
         self.do_smth_after_this = 0
         self.train_data = []
         self.scouting_done = False
-
+        self.point = None
+        self.ramp_pos = None
     # def save_end_result(self, game_result):
     #     if game_result == Result.Victory:
     #         np.save('/results.txt', self.train_data)
@@ -36,6 +37,7 @@ class ProtossBot(sc2.BotAI):
         await self.expand()
         await self.offensive_force_buildings()
         await self.upgrades()
+        await self.send_units_to()
         await self.build_offensive_force()
         await self.scout()
         await self.draw_base()
@@ -136,12 +138,12 @@ class ProtossBot(sc2.BotAI):
                     if self.can_afford(UnitTypeId.OBSERVER) and self.supply_left > 0:
                         await self.do(rf.train(UnitTypeId.OBSERVER))
 
-    def random_location_variance(self, enemy_start_location):
+    def random_location_variance(self, enemy_start_location, default_range=20):
         x = enemy_start_location[0]
         y = enemy_start_location[1]
 
-        x += ((random.randrange(-20, 20)) / 100) * enemy_start_location[0]
-        y += ((random.randrange(-20, 20)) / 100) * enemy_start_location[1]
+        x += ((random.randrange(-default_range, default_range)) / 100) * enemy_start_location[0]
+        y += ((random.randrange(-default_range, default_range)) / 100) * enemy_start_location[1]
 
         if x < 0:
             x = 0
@@ -291,6 +293,36 @@ class ProtossBot(sc2.BotAI):
                                       UpgradeId.PROTOSSAIRWEAPONSLEVEL3, cybercore,
                                       UnitTypeId.VOIDRAY, 10)
 
+    @property
+    def ret_pos(self):
+        if self.ramp_pos is None:
+            self.ramp_pos = list(self.main_base_ramp.upper)[0]
+        if self.point is None:
+            self.point = self.random_location_variance(self.ramp_pos, default_range=12)
+        return self.point, self.ramp_pos
+
+    async def send_units_to(self):
+        units_list = []
+        attack_units = {
+            UnitTypeId.STALKER: [15, 5],
+            UnitTypeId.VOIDRAY: [8, 3],
+            UnitTypeId.PHOENIX: [8, 2],
+            UnitTypeId.SENTRY: [4, 3],
+            UnitTypeId.ZEALOT: [6, 5],
+            UnitTypeId.ORACLE: [1, 1],
+            UnitTypeId.HIGHTEMPLAR: [4, 3],
+            UnitTypeId.ARCHON: [4, 2],
+            UnitTypeId.COLOSSUS: [5, 4]}
+        point, ramp_pos = self.ret_pos
+
+        for unit_id in attack_units:
+            for unit in self.units(unit_id).ready.idle:
+                units_list.append(unit)
+
+        for unit in units_list:
+            await self.do(unit.move(ramp_pos))
+            await self.do(unit.patrol(point, queue=True))
+
     async def train_units(self, unit_id, building, unit_cond_id=None, amount=None):
         if unit_cond_id is None and amount is None:
             cond = True
@@ -318,7 +350,7 @@ class ProtossBot(sc2.BotAI):
             await self.train_units(UnitTypeId.ZEALOT, gw, unit_cond_id=UnitTypeId.STALKER, amount=3)
 
         for rb in self.units(UnitTypeId.ROBOTICSBAY).ready.idle:
-            await self.train_units(UnitTypeId.COLOSSUS, rb, unit_cond_id=UnitTypeId.VOIDRAY, amount=15)
+            await self.train_units(UnitTypeId.COLOSSUS, rb, unit_cond_id=UnitTypeId.VOIDRAY, amount=7)
 
         # for ta in self.units(UnitTypeId.TEMPLARARCHIVE).ready.idle:
         #     await self.train_units(UnitTypeId.HIGHTEMPLAR, ta, UnitTypeId.VOIDRAY, 8)
@@ -332,37 +364,6 @@ class ProtossBot(sc2.BotAI):
         else:
             return self.enemy_start_locations[0]
 
-    # async def attack(self):
-    # attack_units = {
-    #     UnitTypeId.STALKER: [15, 5],
-    #     UnitTypeId.VOIDRAY: [8, 3],
-    #     UnitTypeId.PHOENIX: [8, 2],
-    #     UnitTypeId.SENTRY: [4, 3],
-    #     UnitTypeId.ZEALOT: [6, 5],
-    #     UnitTypeId.ORACLE: [1, 1],
-    #     UnitTypeId.HIGHTEMPLAR: [4, 3],
-    #     UnitTypeId.ARCHON: [4, 2],
-    #     UnitTypeId.COLOSSUS: [5, 4]}
-    #     if self.units(UnitTypeId.STALKER).amount > 15 or self.units(UnitTypeId.VOIDRAY).amount > 10:
-    #         for s in self.units(UnitTypeId.STALKER).idle:
-    #             await self.do(s.attack(self.find_target(self.state)))
-    #         for vd in self.units(UnitTypeId.VOIDRAY).idle:
-    #             await self.do(vd.attack(self.find_target(self.state)))
-    #         for ph in self.units(UnitTypeId.PHOENIX).idle:
-    #             await self.do(ph.attack(self.find_target(self.state)))
-    #         for sen in self.units(UnitTypeId.SENTRY).idle:
-    #             await self.do(sen.attack(self.find_target(self.state)))
-    #
-    #     elif self.units(UnitTypeId.STALKER).amount > 6 or self.units(UnitTypeId.VOIDRAY).amount > 6:
-    #         if len(self.known_enemy_units) > 0:
-    #             for s in self.units(UnitTypeId.STALKER).idle:
-    #                 await self.do(s.attack(random.choice(self.known_enemy_units)))
-    #             for vd in self.units(UnitTypeId.VOIDRAY).idle:
-    #                 await self.do(vd.attack(random.choice(self.known_enemy_units)))
-    #             for ph in self.units(UnitTypeId.PHOENIX).idle:
-    #                 await self.do(ph.attack(random.choice(self.known_enemy_units)))
-    #             for sen in self.units(UnitTypeId.SENTRY).idle:
-    #                 await self.do(sen.attack(random.choice(self.known_enemy_units)))
     async def attack(self):
         attack_units = {
             UnitTypeId.STALKER: [15, 5],
@@ -375,29 +376,63 @@ class ProtossBot(sc2.BotAI):
             UnitTypeId.ARCHON: [4, 2],
             UnitTypeId.COLOSSUS: [5, 4]}
 
-        for u in attack_units:
-            if len(self.units(u).idle) > 0:
-                choice = random.randrange(0, 4)
-                target = False
-                if self.iteration > self.do_smth_after_this:
-                    if choice == 0:
-                        wait = random.randrange(20, 165)
-                        self.do_smth_after_this = self.iteration + wait
+        if self.units(UnitTypeId.STALKER).amount > 15 and self.units(UnitTypeId.VOIDRAY).amount > 10:
+            for s in self.units(UnitTypeId.STALKER).idle:
+                await self.do(s.attack(self.find_target(self.state)))
+            for vd in self.units(UnitTypeId.VOIDRAY).idle:
+                await self.do(vd.attack(self.find_target(self.state)))
+            for ph in self.units(UnitTypeId.PHOENIX).idle:
+                await self.do(ph.attack(self.find_target(self.state)))
+            for sen in self.units(UnitTypeId.SENTRY).idle:
+                await self.do(sen.attack(self.find_target(self.state)))
+            for col in self.units(UnitTypeId.COLOSSUS).idle:
+                await self.do(col.attack(self.find_target(self.state)))
 
-                    elif choice == 1:
-                        if len(self.known_enemy_units) > 0:
-                            target = self.known_enemy_units.closest_to(random.choice(self.units(UnitTypeId.NEXUS)))
-
-                    elif choice == 2:
-                        if len(self.known_enemy_structures) > 0:
-                            target = random.choice(self.known_enemy_structures)
-
-                    elif choice == 3:
-                        target = self.enemy_start_locations[0]
-
-                    if target:
-                        for un in self.units(u).idle:
-                            await self.do(un.attack(target))
+        elif self.units(UnitTypeId.STALKER).amount > 5 and self.units(UnitTypeId.VOIDRAY).amount > 5:
+            if len(self.known_enemy_units) > 0:
+                for s in self.units(UnitTypeId.STALKER).idle:
+                    await self.do(s.attack(random.choice(self.known_enemy_units)))
+                for vd in self.units(UnitTypeId.VOIDRAY).idle:
+                    await self.do(vd.attack(random.choice(self.known_enemy_units)))
+                for ph in self.units(UnitTypeId.PHOENIX).idle:
+                    await self.do(ph.attack(random.choice(self.known_enemy_units)))
+                for sen in self.units(UnitTypeId.SENTRY).idle:
+                    await self.do(sen.attack(random.choice(self.known_enemy_units)))
+    # async def attack(self):
+    #     attack_units = {
+    #         UnitTypeId.STALKER: [15, 5],
+    #         UnitTypeId.VOIDRAY: [8, 3],
+    #         UnitTypeId.PHOENIX: [8, 2],
+    #         UnitTypeId.SENTRY: [4, 3],
+    #         UnitTypeId.ZEALOT: [6, 5],
+    #         UnitTypeId.ORACLE: [1, 1],
+    #         UnitTypeId.HIGHTEMPLAR: [4, 3],
+    #         UnitTypeId.ARCHON: [4, 2],
+    #         UnitTypeId.COLOSSUS: [5, 4]}
+    #
+    #     for u in attack_units:
+    #         if len(self.units(u).idle) > 0:
+    #             choice = random.randrange(0, 4)
+    #             target = False
+    #             if self.iteration > self.do_smth_after_this:
+    #                 if choice == 0:
+    #                     wait = random.randrange(20, 165)
+    #                     self.do_smth_after_this = self.iteration + wait
+    #
+    #                 elif choice == 1:
+    #                     if len(self.known_enemy_units) > 0:
+    #                         target = self.known_enemy_units.closest_to(random.choice(self.units(UnitTypeId.NEXUS)))
+    #
+    #                 elif choice == 2:
+    #                     if len(self.known_enemy_structures) > 0:
+    #                         target = random.choice(self.known_enemy_structures)
+    #
+    #                 elif choice == 3:
+    #                     target = self.enemy_start_locations[0]
+    #
+    #                 if target:
+    #                     for un in self.units(u).idle:
+    #                         await self.do(un.attack(target))
 
 
 run_game(maps.get("RomanticideLE"), [
