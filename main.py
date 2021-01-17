@@ -20,7 +20,7 @@ class Scenario(Enum):
     FIGHT_BACK_ATTACK = 4
 
 
-class ProtossBot(sc2.BotAI):
+class KillerProtossBot(sc2.BotAI):
     def __init__(self):
         super().__init__()
         # number of iterations per minute
@@ -33,6 +33,7 @@ class ProtossBot(sc2.BotAI):
         self.ramp_pos = None
         self.main_base = None
         self.current_scenario = Scenario.PEACE
+        self.late_game = False
         self.no_of_buildings = 0
         self.prev_no_of_buildings = 0
         self.attack_units = {
@@ -69,6 +70,7 @@ class ProtossBot(sc2.BotAI):
         await self.scout()
         await self.rally_new_building()
         await self.log_army_state()
+        await self.apply_chronoboost()
         # await self.draw_base()
         await self.attack()
 
@@ -130,7 +132,8 @@ class ProtossBot(sc2.BotAI):
                     await self.do(nexus.train(UnitTypeId.PROBE))
 
     async def build_pylons(self):
-        if self.supply_left < 5 and not self.already_pending(UnitTypeId.PYLON):
+        supply_limit = 10 if self.late_game else 5
+        if self.supply_left < supply_limit and not self.already_pending(UnitTypeId.PYLON):
             nexuses = self.units(UnitTypeId.NEXUS).ready
             if nexuses.exists:
                 if self.can_afford(UnitTypeId.PYLON):
@@ -159,15 +162,21 @@ class ProtossBot(sc2.BotAI):
             return
 
         if self.alive_or_pending_units(UnitTypeId.NEXUS) < 5 and self.can_afford(UnitTypeId.NEXUS) and \
-                self.alive_or_pending_units(UnitTypeId.STALKER) >= 3 and \
-                self.alive_or_pending_units(UnitTypeId.ZEALOT) >= 2 and \
-                self.alive_or_pending_units(UnitTypeId.VOIDRAY) >= 2:
+                self.alive_or_pending_units(UnitTypeId.STALKER) >= 8 and \
+                self.alive_or_pending_units(UnitTypeId.ZEALOT) >= 3 and \
+                self.alive_or_pending_units(UnitTypeId.VOIDRAY) >= 6:
             await self.expand_correct_location()
             return
 
         if self.alive_or_pending_units(UnitTypeId.NEXUS) < 6 and self.can_afford(UnitTypeId.NEXUS) and \
-                self.units(UnitTypeId.STALKER).amount > 8 and self.units(UnitTypeId.VOIDRAY).amount > 7:
+                self.units(UnitTypeId.STALKER).amount > 10 and self.units(UnitTypeId.VOIDRAY).amount > 8:
             await self.expand_correct_location()
+
+    async def production(self):
+        if self.minerals > 500:
+            for gw in self.units(UnitTypeId.GATEWAY).ready:
+                await self.train_units(UnitTypeId.STALKER, gw)
+                await self.train_units(UnitTypeId.ZEALOT, gw)
 
     async def scout(self):
         if not self.scouting_done:
@@ -202,14 +211,39 @@ class ProtossBot(sc2.BotAI):
         send_to = position.Point2(position.Pointlike((x, y)))
         return send_to
 
+    def interpolate_location(self, base_location, current_location, t):
+        x0 = base_location[0]
+        y0 = base_location[1]
+
+        x1 = current_location[0]
+        y1 = current_location[1]
+
+        x = x1 + (x0 - x1) * t
+        y = y1 + (y0 - y1) * t
+
+        if x < 0:
+            x = 0
+        if y < 0:
+            y = 0
+        if x > self.game_info.map_size[0]:
+            x = self.game_info.map_size[0]
+        if y > self.game_info.map_size[1]:
+            y = self.game_info.map_size[1]
+
+        send_to = position.Point2(position.Pointlike((x, y)))
+        return send_to
+
     def structure_status(self, unit):
         return self.units(unit).ready.exists or self.already_pending(unit)
 
-    async def offensive_force_buildings(self):
-        # for nexus in self.townhalls.ready:
-        #     if nexus.energy >= 50:
-        #         nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, nexus)
+    async def apply_chronoboost(self):
+        for nexus in self.units(UnitTypeId.NEXUS).ready:
+            for gw in self.units(UnitTypeId.GATEWAY).ready:
+                if not gw.has_buff(BuffId.CHRONOBOOSTENERGYCOST):
+                    await self.do(nexus(AbilityId.EFFECT_CHRONOBOOSTENERGYCOST, gw))
+                    return
 
+    async def offensive_force_buildings(self):
         if self.units(UnitTypeId.PYLON).ready.exists:
             pylon = self.units(UnitTypeId.PYLON).ready.random
 
@@ -230,16 +264,23 @@ class ProtossBot(sc2.BotAI):
                     if self.can_afford(UnitTypeId.STARGATE):
                         await self.build(UnitTypeId.STARGATE, near=pylon, placement_step=1)
                     return
+                if self.alive_or_pending_units(UnitTypeId.STALKER) < 5 and \
+                        self.alive_or_pending_units(UnitTypeId.ZEALOT) < 4:
+                    return
                 if not self.structure_status(UnitTypeId.FORGE):
                     if self.can_afford(UnitTypeId.FORGE):
                         await self.build(UnitTypeId.FORGE, near=pylon, placement_step=2)
                     return
 
+            if self.alive_or_pending_units(UnitTypeId.STALKER) < 7 and \
+                    self.alive_or_pending_units(UnitTypeId.ZEALOT) < 6 and \
+                    self.alive_or_pending_units(UnitTypeId.VOIDRAY) < 3:
+                return
+
             if self.units(UnitTypeId.GATEWAY).amount < 3:
                 if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
                     await self.build(UnitTypeId.GATEWAY, near=pylon, placement_step=2)
 
-            # TODO fleet beacon for TEMPEST + MOTHERSHIP
             if self.units(UnitTypeId.CYBERNETICSCORE).ready.exists:
                 if self.units(UnitTypeId.STARGATE).amount < 3:
                     if self.can_afford(UnitTypeId.STARGATE) and not self.already_pending(UnitTypeId.STARGATE):
@@ -265,6 +306,10 @@ class ProtossBot(sc2.BotAI):
                     if self.can_afford(UnitTypeId.TEMPLARARCHIVE) and \
                             not self.already_pending(UnitTypeId.TEMPLARARCHIVE):
                         await self.build(UnitTypeId.TEMPLARARCHIVE, near=pylon, placement_step=2)
+
+                if self.units(UnitTypeId.STARGATE).ready.exists and self.units(UnitTypeId.VOIDRAY).amount > 7:
+                    if self.can_afford(UnitTypeId.FLEETBEACON) and not self.already_pending(UnitTypeId.FLEETBEACON):
+                        await self.build(UnitTypeId.FLEETBEACON, near=pylon, placement_step=2)
 
     async def do_upgrade(self, ability_id, upgrade_id, building, unit_id, unit_amount):
         if self.can_afford(ability_id) and not self.already_pending_upgrade(upgrade_id) and \
@@ -360,7 +405,7 @@ class ProtossBot(sc2.BotAI):
             cond = True
         else:
             cond = self.units(unit_cond_id).amount >= amount
-        if self.can_afford(unit_id) and self.supply_left > 2 and cond:
+        if self.can_afford(unit_id) and self.supply_left > 0 and cond:
             await self.do(building.train(unit_id))
 
     async def rally_units(self):
@@ -378,6 +423,7 @@ class ProtossBot(sc2.BotAI):
         self.prev_no_of_buildings = self.no_of_buildings
 
     async def build_offensive_force(self):
+        await self.production()
         if self.alive_or_pending_units(UnitTypeId.ZEALOT) < 2:
             for gw in self.units(UnitTypeId.GATEWAY).ready:
                 await self.train_units(UnitTypeId.ZEALOT, gw)
@@ -399,6 +445,8 @@ class ProtossBot(sc2.BotAI):
             await self.train_units(UnitTypeId.PHOENIX, sg, unit_cond_id=UnitTypeId.VOIDRAY, amount=6)
             if self.units(UnitTypeId.ORACLE).amount < 1:
                 await self.train_units(UnitTypeId.ORACLE, sg)
+            # await self.train_units(UnitTypeId.CARRIER, sg, unit_cond_id=UnitTypeId.VOIDRAY, amount=7)
+            await self.train_units(UnitTypeId.TEMPEST, sg, unit_cond_id=UnitTypeId.VOIDRAY, amount=6)
 
         for gw in self.units(UnitTypeId.GATEWAY).ready.idle:
             await self.train_units(UnitTypeId.STALKER, gw)
@@ -411,6 +459,10 @@ class ProtossBot(sc2.BotAI):
         for ta in self.units(UnitTypeId.GATEWAY).ready.idle:
             await self.train_units(UnitTypeId.HIGHTEMPLAR, ta, UnitTypeId.VOIDRAY, 7)
 
+        for nex in self.units(UnitTypeId.NEXUS).ready.idle:
+            if self.units(UnitTypeId.MOTHERSHIP).amount < 1:
+                await self.train_units(UnitTypeId.MOTHERSHIP, nex, unit_cond_id=UnitTypeId.TEMPEST, amount=1)
+
     def find_target(self, state):
         if len(self.known_enemy_units) > 0:
             return random.choice(self.known_enemy_units)
@@ -420,9 +472,7 @@ class ProtossBot(sc2.BotAI):
             return self.enemy_start_locations[0]
 
     async def log_army_state(self):
-        for unit in self.attack_units:
-            print(f"{self.all_unit_names[unit]} : {self.units(unit).amount}")
-            print(self.current_scenario.name)
+        print(self.current_scenario.name)
 
     async def attack_target(self, unit_id_list, target=None):
         for unit_id in unit_id_list:
@@ -467,9 +517,14 @@ class ProtossBot(sc2.BotAI):
             else:
                 if self.retreat_distance(Units(all_attacking_enemies).closest_to(self.get_main_base)):
                     self.current_scenario = Scenario.FIGHT_BACK_ATTACK
-        if not self.current_scenario in [Scenario.BASE_ATTACK, Scenario.OUTER_BASES_ATTACK, Scenario.FIGHT_BACK_ATTACK]\
-                and self.units(UnitTypeId.VOIDRAY).amount > 15 and self.units(UnitTypeId.STALKER).amount > 10:
+        if not self.current_scenario in [Scenario.BASE_ATTACK, Scenario.OUTER_BASES_ATTACK,
+                                         Scenario.FIGHT_BACK_ATTACK] and \
+                self.units(UnitTypeId.VOIDRAY).amount > 7 and self.units(UnitTypeId.STALKER).amount > 8 or \
+                self.supply_army > 85:
             self.current_scenario = Scenario.ATTACK_ENEMY_BASE
+            self.late_game = True
+        if not self.current_scenario == Scenario.ATTACK_ENEMY_BASE and not all_attacking_enemies:
+            self.current_scenario = Scenario.PEACE
         return all_attacking_enemies
 
     def owned_army(self):
@@ -481,28 +536,41 @@ class ProtossBot(sc2.BotAI):
 
     async def retreat_all_units_if_too_far(self):
         for unit in self.owned_army():
-            if self.retreat_distance(unit):
+            if not self.retreat_distance(unit):
                 await self.do(unit.move(self.ret_pos[0]))
 
+    async def retreat_if_low_shield(self, units, all_in):
+        for unit in units:
+            if unit.shield_percentage < 0.2 and not all_in:
+                await self.do(unit.move(self.get_main_base))
+            elif unit.shield_percentage < 0.6:
+                retreat_pos = self.interpolate_location(self.get_main_base.position, unit.position, 0.2)
+                await self.do(unit.move(retreat_pos))
+
     async def attack(self):
+        army = self.owned_army()
+        if army:
+            await self.retreat_if_low_shield(army, all_in=self.current_scenario == Scenario.ATTACK_ENEMY_BASE)
         attacking_enemies = self.handle_scenario()
         index, close_enemies = self.nexus_is_under_attack()
 
-        if not self.current_scenario == Scenario.ATTACK_ENEMY_BASE:
-            await self.retreat_all_units_if_too_far()
+        # if not self.current_scenario == Scenario.ATTACK_ENEMY_BASE:
+        #     await self.retreat_all_units_if_too_far()
 
         if self.current_scenario == Scenario.PEACE:
             return
         elif self.current_scenario == Scenario.BASE_ATTACK:
-            target = random.choice(close_enemies)
-            await self.attack_target(self.attack_units.keys(), target)
+            if close_enemies:
+                target = close_enemies[0]
+                await self.attack_target(self.attack_units.keys(), target)
         elif self.current_scenario == Scenario.OUTER_BASES_ATTACK:
-            target = random.choice(close_enemies)
-            await self.attack_target(self.attack_units.keys(), target)
+            if close_enemies:
+                target = close_enemies[0]
+                await self.attack_target(self.attack_units.keys(), target)
         elif self.current_scenario == Scenario.FIGHT_BACK_ATTACK:
             await self.attack_target(self.attack_units.keys())
         elif self.current_scenario == Scenario.ATTACK_ENEMY_BASE:
-            target = self.find_target(self.state)
+            target = self.enemy_start_locations[0]
             await self.attack_target(self.attack_units.keys(), target)
 
         # if self.units(UnitTypeId.STALKER).amount > 5 and self.units(UnitTypeId.VOIDRAY).amount > 4:
@@ -515,5 +583,5 @@ class ProtossBot(sc2.BotAI):
 
 
 run_game(maps.get("RomanticideLE"), [
-    Bot(Race.Protoss, ProtossBot()), Computer(Race.Terran, Difficulty.Medium)
+    Bot(Race.Protoss, KillerProtossBot()), Computer(Race.Terran, Difficulty.Medium)
 ], realtime=False)
