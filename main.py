@@ -1,13 +1,13 @@
-from enum import Enum
+import os
 import sc2
-from sc2 import run_game, maps, Race, Difficulty, position, Result
-from sc2.player import Bot, Computer
-from sc2.constants import UnitTypeId, AbilityId, UpgradeId, BuffId
+import cv2
 import random
 import numpy as np
-import cv2
-import os
+from enum import Enum
 from sc2.units import Units
+from sc2.player import Bot, Computer
+from sc2 import run_game, maps, Race, Difficulty, position
+from sc2.constants import UnitTypeId, AbilityId, UpgradeId, BuffId
 
 os.environ["SC2PATH"] = 'D:/Downloads/Starcraft II/Starcraft II'
 
@@ -20,10 +20,9 @@ class Scenario(Enum):
     FIGHT_BACK_ATTACK = 4
 
 
-class KillerProtossBot(sc2.BotAI):
+class ProtossBot(sc2.BotAI):
     def __init__(self):
         super().__init__()
-        # number of iterations per minute
         self.IT_PER_MIN = 165
         self.MAX_WORKERS = 80
         self.do_smth_after_this = 0
@@ -53,10 +52,6 @@ class KillerProtossBot(sc2.BotAI):
                                UnitTypeId.ORACLE: "oracle",
                                UnitTypeId.COLOSSUS: "colossus"}
 
-    # def save_end_result(self, game_result):
-    #     if game_result == Result.Victory:
-    #         np.save('/results.txt', self.train_data)
-
     async def on_step(self, iteration):
         self.iteration = iteration
         await self.distribute_workers()
@@ -75,7 +70,7 @@ class KillerProtossBot(sc2.BotAI):
         await self.attack()
 
         if iteration == 0:
-            await self.chat_send("hi (pylon)(glhf)")
+            await self.chat_send("(pylon) hi (glhf)")
 
     async def draw_base(self):
         draw_dict = {
@@ -583,5 +578,5 @@ class KillerProtossBot(sc2.BotAI):
 
 
 run_game(maps.get("RomanticideLE"), [
-    Bot(Race.Protoss, KillerProtossBot()), Computer(Race.Terran, Difficulty.Medium)
+    Bot(Race.Protoss, ProtossBot()), Computer(Race.Terran, Difficulty.Medium)
 ], realtime=False)
