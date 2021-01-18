@@ -5,11 +5,9 @@ from sc2.player import Bot, Computer
 from sc2.constants import UnitTypeId, AbilityId, UpgradeId, BuffId
 import random
 import numpy as np
-import cv2
 import os
 from sc2.units import Units
 
-os.environ["SC2PATH"] = 'D:/Downloads/Starcraft II/Starcraft II'
 
 
 class Scenario(Enum):
@@ -36,6 +34,8 @@ class KillerProtossBot(sc2.BotAI):
         self.late_game = False
         self.no_of_buildings = 0
         self.prev_no_of_buildings = 0
+        self.cannon_pylon_built = []
+        self.cannon_center = None
         self.attack_units = {
             UnitTypeId.STALKER: [15, 5],
             UnitTypeId.VOIDRAY: [8, 3],
@@ -57,6 +57,12 @@ class KillerProtossBot(sc2.BotAI):
     #     if game_result == Result.Victory:
     #         np.save('/results.txt', self.train_data)
 
+    @property
+    def get_cannon_point(self):
+        if self.cannon_center is None:
+            self.cannon_center = self.random_location_variance(list(self.main_base_ramp.lower)[0], 1)
+        return self.cannon_center
+
     async def on_step(self, iteration):
         self.iteration = iteration
         await self.distribute_workers()
@@ -73,7 +79,6 @@ class KillerProtossBot(sc2.BotAI):
         await self.apply_chronoboost()
         # await self.draw_base()
         await self.attack()
-
         if iteration == 0:
             await self.chat_send("hi (pylon)(glhf)")
 
@@ -156,8 +161,8 @@ class KillerProtossBot(sc2.BotAI):
         await self.build(UnitTypeId.NEXUS, near=location, random_alternative=False)
 
     async def expand(self):
-        if self.alive_or_pending_units(UnitTypeId.NEXUS) < 3 and \
-                self.can_afford(UnitTypeId.NEXUS):
+        if self.units(UnitTypeId.NEXUS).amount < 3 and \
+                self.can_afford(UnitTypeId.NEXUS) :
             await self.expand_correct_location()
             return
 
@@ -244,6 +249,8 @@ class KillerProtossBot(sc2.BotAI):
                     return
 
     async def offensive_force_buildings(self):
+        # await self.build_cannons_and_shield_batteries(self.get_cannon_point, "main ramp")
+
         if self.units(UnitTypeId.PYLON).ready.exists:
             pylon = self.units(UnitTypeId.PYLON).ready.random
 
@@ -398,6 +405,8 @@ class KillerProtossBot(sc2.BotAI):
         return self.point, self.ramp_pos
 
     def alive_or_pending_units(self, unit_id):
+        if unit_id == UnitTypeId.NEXUS:
+            return self.units(unit_id).ready.amount
         return self.units(unit_id).ready.amount + self.already_pending(unit_id)
 
     async def train_units(self, unit_id, building, unit_cond_id=None, amount=None):
@@ -414,6 +423,29 @@ class KillerProtossBot(sc2.BotAI):
         for building in rally_buildings:
             for b in self.units(building):
                 await self.do(b(AbilityId.RALLY_BUILDING, location_point))
+
+    async def build_cannons_and_shield_batteries(self, center, name):
+        if not name in self.cannon_pylon_built:
+            if self.can_afford(UnitTypeId.PYLON):
+                self.cannon_pylon_built.append(name)
+                await self.build(UnitTypeId.PYLON, near=center, placement_step=1)
+            return
+
+        pylon = self.units(UnitTypeId.PYLON).closest_to(center)
+        if pylon.distance_to(center) < 3:
+            print('located pylon')
+            if self.alive_or_pending_units(UnitTypeId.SHIELDBATTERY) < 1:
+                if self.can_afford(UnitTypeId.SHIELDBATTERY):
+                    print('building battery')
+                    await self.build(UnitTypeId.SHIELDBATTERY, near=pylon, placement_step=1)
+                return
+            if self.alive_or_pending_units(UnitTypeId.PHOTONCANNON) < 3:
+                if self.can_afford(UnitTypeId.PHOTONCANNON):
+                    print('building cannon')
+                    await self.build(UnitTypeId.PHOTONCANNON, near=pylon, placement_step=1)
+                return
+
+
 
     async def rally_new_building(self):
         rally_buildings = [UnitTypeId.GATEWAY, UnitTypeId.STARGATE, UnitTypeId.ROBOTICSFACILITY]
@@ -472,7 +504,7 @@ class KillerProtossBot(sc2.BotAI):
             return self.enemy_start_locations[0]
 
     async def log_army_state(self):
-        print(self.current_scenario.name)
+        pass #print(self.current_scenario.name)
 
     async def attack_target(self, unit_id_list, target=None):
         for unit_id in unit_id_list:
@@ -583,5 +615,5 @@ class KillerProtossBot(sc2.BotAI):
 
 
 run_game(maps.get("RomanticideLE"), [
-    Bot(Race.Protoss, KillerProtossBot()), Computer(Race.Terran, Difficulty.Medium)
+    Bot(Race.Protoss, KillerProtossBot()), Computer(Race.Protoss, Difficulty.Hard)
 ], realtime=False)
